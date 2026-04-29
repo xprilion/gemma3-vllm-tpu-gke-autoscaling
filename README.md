@@ -6,7 +6,7 @@ A deployment guide covering quota management, capacity planning, model compatibi
 
 ## What This Is
 
-A practical walkthrough of deploying LLM inference on GKE with TPU autoscaling -- from first quota check to a live, autoscaling endpoint. Covers the real experience, including every quota gate, capacity constraint, and Gemma 4 compatibility failure encountered along the way.
+A practical walkthrough of deploying LLM inference on GKE with TPU autoscaling - from first quota check to a live, autoscaling endpoint. Covers the real experience, including every quota gate, capacity constraint, and Gemma 4 compatibility failure encountered along the way.
 
 **Deployed:** vLLM serving Gemma 3 4B on TPU v5e with HPA autoscaling on `num_requests_waiting`.
 
