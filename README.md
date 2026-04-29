@@ -2,7 +2,7 @@
 
 A deployment guide covering quota management, capacity planning, model compatibility, and HPA-based autoscaling for vLLM on Google Kubernetes Engine with Cloud TPU.
 
-**[Read the full article](https://xprilion.github.io/gemma3-vllm-tpu-gke-autoscaling/)**
+**[Read the full article](https://xprilion.com/gemma3-vllm-tpu-gke-autoscaling/)**
 
 ## What This Is
 
