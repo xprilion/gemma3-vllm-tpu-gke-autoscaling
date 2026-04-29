@@ -750,6 +750,11 @@ for q in data.get('quotas', []):
 
       <p>With <code>GPUS_ALL_REGIONS=1</code>, creating a <code>ct5lp-hightpu-8t</code> node fails with "Quota exceeded. Limit: 1.0 globally." Creating a <code>ct5lp-hightpu-1t</code> succeeds. The counting is per-chip.</p>
 
+      <figure>
+        <img src="gup_all_regions_quota.png" alt="Google Cloud Console showing GPUS_ALL_REGIONS quota at limit 1 with 100% usage" loading="lazy" style="width:100%;border-radius:6px;border:1px solid var(--border);">
+        <figcaption style="text-align:center;font-size:0.85em;color:var(--text-secondary);margin-top:0.5em;">The GPUS_ALL_REGIONS quota page in the GCP Console. Limit: 1, usage: 1 (100%). This single quota gates all TPU provisioning.</figcaption>
+      </figure>
+
       <h3>The quota request experience</h3>
 
       <p>I requested an increase from 0 to 16. Google's response:</p>
@@ -920,6 +925,11 @@ They will be created asynchronously once capacity is available.</code></pre>
 <pre class="language-plaintext"><code>Quota 'GPUS_ALL_REGIONS' exceeded. Limit: 1.0 globally.</code></pre>
 
       <p>Hard stop. No amount of waiting fixes this. You need to increase quota first.</p>
+
+      <figure>
+        <img src="cluster_node_pools.png" alt="GKE Console showing tpu-cluster with default-pool and tpu-v5e-pool node pools both in Ok status" loading="lazy" style="width:100%;border-radius:6px;border:1px solid var(--border);">
+        <figcaption style="text-align:center;font-size:0.85em;color:var(--text-secondary);margin-top:0.5em;">The GKE Console showing both node pools healthy: default-pool (e2-standard-4) and tpu-v5e-pool (ct5lp-hightpu-1t) with 0-1 autoscaling.</figcaption>
+      </figure>
     </section>
 
     <!-- ============================================================ -->
@@ -1163,6 +1173,11 @@ spec:
 <pre class="language-yaml"><code>mountOptions: "implicit-dirs,file-cache:enable-parallel-downloads:true,file-cache:parallel-downloads-per-file:100,file-cache:max-parallel-downloads:-1"</code></pre>
 
       <p>This makes a significant difference for scale-up time. The second replica can be serving requests within a few minutes of the node becoming available, rather than waiting for a full download.</p>
+
+      <figure>
+        <img src="api_response.png" alt="Terminal showing a curl request to vLLM and the JSON completion response from Gemma 3 4B running on TPU" loading="lazy" style="width:100%;border-radius:6px;border:1px solid var(--border);">
+        <figcaption style="text-align:center;font-size:0.85em;color:var(--text-secondary);margin-top:0.5em;">A live inference request to the vLLM endpoint. Gemma 3 4B running on a single TPU v5e chip, responding via the OpenAI-compatible completions API.</figcaption>
+      </figure>
     </section>
 
     <!-- ============================================================ -->
@@ -1317,6 +1332,11 @@ spec:
 
 <pre class="language-plaintext"><code>NAME       REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
 vllm-hpa   Deployment/vllm-tpu   0/5       1         2         1          6m</code></pre>
+
+      <figure>
+        <img src="kubectl_hpa_terminal.png" alt="Terminal showing kubectl get hpa output with vllm-hpa reading 0/5 targets, 1 replica" loading="lazy" style="width:100%;border-radius:6px;border:1px solid var(--border);">
+        <figcaption style="text-align:center;font-size:0.85em;color:var(--text-secondary);margin-top:0.5em;">The HPA reading vLLM's <code>num_requests_waiting</code> metric: 0 waiting requests against a threshold of 5, with 1 active replica.</figcaption>
+      </figure>
 
       <p>The HPA was reading the metric correctly: <code>0/5</code> means 0 waiting requests against a threshold of 5. With <code>GPUS_ALL_REGIONS=1</code>, the node pool max is 1, so autoscaling to a second TPU node would require more quota. But the entire signal chain is proven and working. When more quota arrives, I just change <code>maxReplicas</code> and the node pool's <code>--max-nodes</code>.</p>
 
