@@ -49,7 +49,7 @@ kubectl apply -f k8s/pod-monitoring.yaml
 kubectl apply -f k8s/hpa.yaml
 ```
 
-See the [full article](https://xprilion.github.io/gemma3-vllm-tpu-gke-autoscaling/) for complete setup including GCS bucket, Workload Identity, HF token, and metrics adapter.
+See the [full article](https://xprilion.com/gemma3-vllm-tpu-gke-autoscaling/) for complete setup including GCS bucket, Workload Identity, HF token, and metrics adapter.
 
 ## Repository Structure
 
@@ -90,3 +90,9 @@ See the [full article](https://xprilion.github.io/gemma3-vllm-tpu-gke-autoscalin
 ## License
 
 MIT
+
+## Shoutout 
+
+This project was a part of #TPUSprint by Google's AI Developer Programs team. Google Cloud credits were provided for this project.
+
+I thank the team for their invaluable support! <3
