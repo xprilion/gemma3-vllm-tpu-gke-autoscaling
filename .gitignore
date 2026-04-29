@@ -1,0 +1,7 @@
+.env
+.venv/
+tpu-cluster-resources.json
+__pycache__/
+*.pyc
+.DS_Store
+

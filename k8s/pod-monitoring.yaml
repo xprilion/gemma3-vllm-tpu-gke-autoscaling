@@ -1,0 +1,13 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: vllm-pod-monitoring
+  namespace: vllm
+spec:
+  selector:
+    matchLabels:
+      app: vllm-tpu
+  endpoints:
+  - path: /metrics
+    port: 8000
+    interval: 15s

@@ -1,0 +1,1630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autoscaling LLM Inference on GKE with TPU v5e and vLLM | Anubhav Singh</title>
+  <meta name="description" content="A deployment guide covering quota management, capacity planning, model compatibility, and HPA-based autoscaling for vLLM on GKE with Cloud TPU.">
+  <meta property="og:title" content="Autoscaling LLM Inference on GKE with TPU v5e and vLLM">
+  <meta property="og:description" content="A practical walkthrough: quota, capacity, Gemma 4 compatibility, and autoscaling from first principles.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://xprilion.github.io/gemma3-vllm-tpu-gke-autoscaling/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@xprilion">
+  <meta name="twitter:creator" content="@xprilion">
+  <meta name="author" content="Anubhav Singh">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #fafaf8;
+      --text: #1a1a1a;
+      --text-secondary: #555;
+      --accent: #7b46f6;
+      --link: #2563eb;
+      --code-bg: #f0eeeb;
+      --border: #e5e2dd;
+      --blockquote-bg: #f5f3f0;
+      --blockquote-border: #7b46f6;
+      --table-header-bg: #f0eeeb;
+      --table-alt: #f8f7f5;
+    }
+
+    html.dark {
+      --bg: #1a1a1a;
+      --text: #e0e0e0;
+      --text-secondary: #999;
+      --accent: #a78bfa;
+      --link: #60a5fa;
+      --code-bg: #2a2a28;
+      --border: #333;
+      --blockquote-bg: #222220;
+      --blockquote-border: #a78bfa;
+      --table-header-bg: #2a2a28;
+      --table-alt: #232321;
+    }
+
+    /* Dark mode Prism overrides */
+    html.dark code[class*="language-"],
+    html.dark pre[class*="language-"] {
+      color: #e0e0e0;
+      text-shadow: none;
+    }
+    html.dark .token.comment,
+    html.dark .token.prolog,
+    html.dark .token.doctype,
+    html.dark .token.cdata { color: #999; }
+    html.dark .token.punctuation { color: #ccc; }
+    html.dark .token.property,
+    html.dark .token.tag,
+    html.dark .token.boolean,
+    html.dark .token.number,
+    html.dark .token.constant,
+    html.dark .token.symbol,
+    html.dark .token.deleted { color: #79c0ff; }
+    html.dark .token.selector,
+    html.dark .token.attr-name,
+    html.dark .token.string,
+    html.dark .token.char,
+    html.dark .token.builtin,
+    html.dark .token.inserted { color: #a5d6ff; }
+    html.dark .token.operator,
+    html.dark .token.entity,
+    html.dark .token.url,
+    html.dark .language-css .token.string,
+    html.dark .style .token.string { color: #d2a8ff; }
+    html.dark .token.atrule,
+    html.dark .token.attr-value,
+    html.dark .token.keyword { color: #ff7b72; }
+    html.dark .token.function,
+    html.dark .token.class-name { color: #d2a8ff; }
+    html.dark .token.regex,
+    html.dark .token.important,
+    html.dark .token.variable { color: #ffa657; }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    [id] {
+      scroll-margin-top: 20px;
+    }
+
+    body {
+      font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+      font-size: 17px;
+      line-height: 1.8;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ── Header / Nav bar ─────────────────────────────────────────── */
+    .site-nav {
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .site-nav a {
+      color: var(--text);
+      text-decoration: none;
+      font-family: 'Source Serif 4', Georgia, serif;
+      font-size: 1.05em;
+      font-weight: 600;
+    }
+
+    .site-nav a:hover {
+      color: var(--accent);
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .nav-right a {
+      font-size: 0.9em;
+      font-weight: 400;
+      color: var(--text-secondary);
+    }
+
+    .nav-right a:hover {
+      color: var(--link);
+    }
+
+    .theme-toggle {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--text);
+      line-height: 1;
+      transition: background 0.2s;
+    }
+
+    .theme-toggle:hover {
+      background: var(--border);
+    }
+
+    /* ── Article header ───────────────────────────────────────────── */
+    .article-header {
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 48px 24px 32px;
+    }
+
+    .article-header h1 {
+      font-size: 2.2em;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .article-header .subtitle {
+      font-size: 1.1em;
+      color: var(--text-secondary);
+      font-style: italic;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .article-meta {
+      font-size: 0.9em;
+      color: var(--text-secondary);
+    }
+
+    .article-meta a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    .article-meta a:hover {
+      text-decoration: underline;
+    }
+
+    .article-meta .sep {
+      margin: 0 6px;
+    }
+
+    /* ── Table of Contents ────────────────────────────────────────── */
+    .toc {
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 0 24px 32px;
+    }
+
+    .toc nav {
+      background: var(--blockquote-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      padding: 20px 24px;
+    }
+
+    .toc nav p {
+      font-weight: 600;
+      font-size: 0.95em;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 0.9em;
+      line-height: 1.9;
+    }
+
+    .toc ol li {
+      margin-bottom: 0;
+    }
+
+    .toc a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Main content ─────────────────────────────────────────────── */
+    main {
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    h2 {
+      font-size: 1.6em;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 56px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 1.25em;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 36px;
+      margin-bottom: 12px;
+    }
+
+    h4 {
+      font-size: 1.05em;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 1.2em;
+    }
+
+    strong {
+      font-weight: 600;
+    }
+
+    /* ── Inline code ──────────────────────────────────────────────── */
+    code:not([class*="language-"]) {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+      background: var(--code-bg);
+      border-radius: 3px;
+      padding: 2px 6px;
+    }
+
+    /* ── Code blocks ──────────────────────────────────────────────── */
+    pre[class*="language-"] {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13.5px;
+      line-height: 1.5;
+      background: var(--code-bg);
+      border-radius: 6px;
+      padding: 1.2em;
+      margin: 16px 0 20px;
+      overflow-x: auto;
+    }
+
+    pre[class*="language-"] code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13.5px;
+      background: transparent;
+      border: none;
+      padding: 0;
+    }
+
+    /* ── Blockquotes ──────────────────────────────────────────────── */
+    blockquote {
+      border-left: 3px solid var(--blockquote-border);
+      background: var(--blockquote-bg);
+      padding: 1em 1.5em;
+      margin: 20px 0;
+      font-style: italic;
+    }
+
+    blockquote p {
+      margin-bottom: 0.5em;
+    }
+
+    blockquote p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* ── Tables ───────────────────────────────────────────────────── */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 16px 0 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9em;
+      border: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--table-header-bg);
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 2px solid var(--border);
+      border-right: 1px solid var(--border);
+    }
+
+    th:last-child {
+      border-right: none;
+    }
+
+    td {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+    }
+
+    td:last-child {
+      border-right: none;
+    }
+
+    tr:nth-child(even) {
+      background: var(--table-alt);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* ── Lists ────────────────────────────────────────────────────── */
+    ul, ol {
+      margin: 12px 0 20px;
+      padding-left: 24px;
+    }
+
+    li {
+      margin-bottom: 4px;
+    }
+
+    /* ── Details / expandable blocks ──────────────────────────────── */
+    details {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin: 20px 0;
+      overflow: hidden;
+    }
+
+    details summary {
+      padding: 12px 16px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9em;
+      color: var(--accent);
+      user-select: none;
+      list-style: none;
+    }
+
+    details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details summary::before {
+      content: "\25B6\FE0E";
+      display: inline-block;
+      margin-right: 8px;
+      font-size: 0.75em;
+      transition: transform 0.2s;
+    }
+
+    details[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    details summary:hover {
+      background: var(--border);
+    }
+
+    details > div {
+      padding: 0 16px 16px;
+    }
+
+    details pre[class*="language-"] {
+      margin: 8px 0 0;
+      border-radius: 0;
+    }
+
+    /* ── File tree ────────────────────────────────────────────────── */
+    .file-tree {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      background: var(--code-bg);
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin: 16px 0 20px;
+      line-height: 1.7;
+    }
+
+    .file-tree a {
+      text-decoration: none;
+    }
+
+    .file-tree a:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    footer {
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 24px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 0.85em;
+    }
+
+    footer a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .article-header h1 {
+        font-size: 1.7em;
+      }
+
+      .article-header .subtitle {
+        font-size: 1em;
+      }
+
+      .article-header {
+        padding: 32px 16px 24px;
+      }
+
+      .site-nav {
+        padding: 16px;
+      }
+
+      .toc {
+        padding: 0 16px 24px;
+      }
+
+      main {
+        padding: 0 16px 60px;
+      }
+
+      h2 {
+        font-size: 1.35em;
+      }
+
+      h3 {
+        font-size: 1.1em;
+      }
+
+      pre[class*="language-"] {
+        font-size: 12.5px;
+        padding: 1em;
+        border-radius: 4px;
+      }
+
+      .table-wrap {
+        margin-left: -16px;
+        margin-right: -16px;
+        padding: 0 16px;
+      }
+
+      table {
+        font-size: 0.82em;
+      }
+
+      td, th {
+        padding: 6px 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Site navigation ─────────────────────────────────────────── -->
+  <nav class="site-nav">
+    <a href="https://xprilion.com">Anubhav Singh</a>
+    <div class="nav-right">
+      <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling">GitHub</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">&#9790;</button>
+    </div>
+  </nav>
+
+  <!-- ── Article header ──────────────────────────────────────────── -->
+  <header class="article-header">
+    <h1>Autoscaling LLM Inference on GKE with TPU v5e and vLLM: A Deployment Guide</h1>
+    <p class="subtitle">A practical walkthrough covering quota management, capacity planning, model compatibility, and HPA-based autoscaling for vLLM on Google Kubernetes Engine with Cloud TPU.</p>
+    <p class="article-meta">
+      <a href="https://xprilion.com">Anubhav Singh</a>
+      <span class="sep">/</span>
+      <a href="https://twitter.com/xprilion">@xprilion</a>
+      <span class="sep">/</span>
+      April 2026
+      <span class="sep">/</span>
+      ~25 min read
+    </p>
+  </header>
+
+  <!-- ── Table of Contents ───────────────────────────────────────── -->
+  <div class="toc">
+    <nav>
+      <p>Contents</p>
+      <ol>
+        <li><a href="#introduction">Introduction</a></li>
+        <li><a href="#tpu-quotas">Understanding TPU Quotas on Google Cloud</a></li>
+        <li><a href="#capacity-planning">Capacity Planning and Zone Selection</a></li>
+        <li><a href="#cluster-setup">Cluster Setup</a></li>
+        <li><a href="#tpu-node-pool">TPU Node Pool Configuration</a></li>
+        <li><a href="#model-selection">Model Selection and Gemma 4 Compatibility</a></li>
+        <li><a href="#deploying-vllm">Deploying vLLM on TPU</a></li>
+        <li><a href="#autoscaling">Autoscaling with HPA and Managed Prometheus</a></li>
+        <li><a href="#operational-notes">Operational Notes</a></li>
+        <li><a href="#lessons-learned">Lessons Learned</a></li>
+        <li><a href="#repository-teardown">Repository and Teardown</a></li>
+      </ol>
+    </nav>
+  </div>
+
+  <!-- ── Article body ────────────────────────────────────────────── -->
+  <main>
+
+    <!-- ============================================================ -->
+    <!-- 1. INTRODUCTION -->
+    <!-- ============================================================ -->
+    <section id="introduction">
+      <h2>1. Introduction</h2>
+
+      <p>This post is not a step-by-step beginner tutorial. It's a deployment diary: every quota gate I hit, every capacity error I waited out, every Gemma 4 crash I debugged, and the autoscaling stack I wired up once the TPU finally came online. If you're planning to serve an LLM on Cloud TPU through GKE, this is the reference I wish I'd had before I started.</p>
+
+      <p>I wanted to deploy Gemma 4 26B on 8 TPU v5e chips with full HPA autoscaling. What I actually deployed was Gemma 3 4B on a single chip, because quota said no. But the architecture is identical -- the only difference is a machine type string, a topology label, and a model name. The full autoscaling stack (Prometheus metrics, Custom Metrics Adapter, HorizontalPodAutoscaler) is proven and running.</p>
+
+      <p><strong>Who this is for:</strong> Engineers who have GKE experience and want to add TPU-backed LLM inference to their cluster. I assume you know Kubernetes, <code>gcloud</code>, and at least the basics of how vLLM works.</p>
+
+      <p>Here's what the system looks like at a high level:</p>
+
+<pre class="language-plaintext"><code>                        +------------------+
+                        |   Load Balancer  |
+                        |   (Service)      |
+                        +--------+---------+
+                                 |
+                        +--------v---------+
+                        |  vLLM on TPU v5e |
+                        |  (Deployment)    |
+                        +--------+---------+
+                                 |
+              +------------------+------------------+
+              |                  |                  |
+     +--------v------+  +-------v-------+  +-------v--------+
+     | PodMonitoring  |  | GCS FUSE      |  | HF Token       |
+     | (Prometheus)   |  | (Model Cache) |  | (K8s Secret)   |
+     +--------+------+  +---------------+  +----------------+
+              |
+     +--------v-----------+
+     | Custom Metrics      |
+     | Adapter             |
+     +--------+------------+
+              |
+     +--------v-----------+
+     | HPA                 |
+     | (autoscaling/v2)    |
+     +--------+------------+
+              |
+     +--------v-----------+
+     | Node Pool           |
+     | Autoscaler          |
+     +---------------------+</code></pre>
+
+      <p>The repository backing this guide is at <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling">github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling</a>.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 2. UNDERSTANDING TPU QUOTAS -->
+    <!-- ============================================================ -->
+    <section id="tpu-quotas">
+      <h2>2. Understanding TPU Quotas on Google Cloud</h2>
+
+      <p>Before creating anything, I needed to understand the quota landscape. TPU quotas on GCP are not intuitive. There are three independent gates, and all three must pass before a TPU node can be provisioned.</p>
+
+      <h3>The three-gate model</h3>
+
+<pre class="language-plaintext"><code>Gate 1: Regional TPU quota (e.g. TPU_LITE_PODSLICE_V5 = 16 in us-central1)
+    |
+    v
+Gate 2: Global accelerator cap (GPUS_ALL_REGIONS = ???)
+    |
+    v
+Gate 3: Actual physical capacity (stockout or not)</code></pre>
+
+      <p><strong>Gate 1</strong> is the regional TPU-specific quota. You'll find it under IAM &amp; Admin &gt; Quotas for a specific region. Most people discover this one, think they're covered, and stop looking.</p>
+
+      <p><strong>Gate 2</strong> is a project-level master throttle on all accelerator resources. Despite the name containing "GPU", it counts TPU chips too. It's effectively <code>ACCELERATORS_ALL_REGIONS</code>, but Google never renamed it. I'll come back to this one -- it cost me the most time.</p>
+
+      <p><strong>Gate 3</strong> is physical availability. Even with both quotas cleared, TPUs are globally constrained hardware. The zone may simply have nothing available right now.</p>
+
+      <p>The quota names you need to know:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Quota Name</th><th>Scope</th><th>What It Controls</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>TPU_LITE_DEVICE_V5</code></td><td>Regional</td><td>Single-chip v5e devices (v5litepod-1)</td></tr>
+            <tr><td><code>TPU_LITE_PODSLICE_V5</code></td><td>Regional</td><td>Multi-chip v5e pod slices (v5litepod-4, -8, etc.)</td></tr>
+            <tr><td><code>PREEMPTIBLE_TPU_LITE_PODSLICE_V5</code></td><td>Regional</td><td>Spot/preemptible versions</td></tr>
+            <tr><td><code>GPUS_ALL_REGIONS</code></td><td><strong>Global</strong></td><td>Master cap on ALL accelerators (GPUs AND TPUs)</td></tr>
+            <tr><td><code>tpu_family:CT6E</code></td><td>Regional</td><td>Trillium (v6e) -- different quota system</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>There's a subtle distinction between <code>TPU_LITE_DEVICE_V5</code> and <code>TPU_LITE_PODSLICE_V5</code>. The first covers single-chip machines (<code>ct5lp-hightpu-1t</code>). The second covers multi-chip machines (<code>ct5lp-hightpu-4t</code> and above). I had device quota of 0 and podslice quota of 16, which meant single-chip configs were blocked by regional quota while multi-chip configs were allowed -- until <code>GPUS_ALL_REGIONS</code> blocked everything anyway.</p>
+
+      <h3>How to check all quotas at once</h3>
+
+      <p>Regional TPU quota:</p>
+
+<pre class="language-bash"><code>for region in us-central1 us-east1 us-east5 europe-west4 us-west4; do
+  echo "=== $region ==="
+  gcloud compute regions describe $region --project=YOUR_PROJECT --format=json 2&gt;&amp;1 | \
+    python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for q in data.get('quotas', []):
+    m = q.get('metric','')
+    if 'TPU' in m and q.get('limit', 0) &gt; 0:
+        print(f'  {m}: limit={q[\"limit\"]}, usage={q[\"usage\"]}')
+"
+done</code></pre>
+
+      <p>Global accelerator quota (this is the critical one):</p>
+
+<pre class="language-bash"><code>gcloud compute project-info describe --project=YOUR_PROJECT --format=json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for q in data.get('quotas', []):
+    if 'GPU' in q.get('metric','') or 'TPU' in q.get('metric',''):
+        print(f\"  {q['metric']}: limit={q['limit']}, usage={q['usage']}\")
+"</code></pre>
+
+      <h3>The GPUS_ALL_REGIONS story</h3>
+
+      <p>I had <code>TPU_LITE_PODSLICE_V5=16</code> across multiple regions. I spent a full day trying to create TPU node pools across six zones. Every attempt came back with capacity errors:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Zone</th><th>Result</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>us-central1-a</td><td>Capacity exhausted (waited 35 min)</td></tr>
+            <tr><td>us-east5-b</td><td>General stockout (even CPU VMs failed)</td></tr>
+            <tr><td>europe-west4-a</td><td>Capacity exhausted (tried v5e-4, v5e-4 spot, v5e-8)</td></tr>
+            <tr><td>us-central1-b</td><td>v6e capacity exhausted</td></tr>
+            <tr><td>us-east5-a</td><td>v6e capacity exhausted</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>After hours of zone-hopping, I tried <code>us-central1-a</code> again. This time, instead of a capacity error, I got:</p>
+
+<pre class="language-plaintext"><code>Quota 'GPUS_ALL_REGIONS' exceeded. Limit: 0.0 globally.</code></pre>
+
+      <p>The earlier capacity errors had been <strong>masking</strong> the quota issue. When there's no physical capacity, GKE returns a capacity error before it even checks quota. Once capacity opened up, the quota gate kicked in and blocked me. I'd been waiting for capacity that wouldn't have helped.</p>
+
+      <h3>How GPUS_ALL_REGIONS is counted</h3>
+
+      <p>I tested this empirically. The quota is counted <strong>per chip</strong>, not per node:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Machine Type</th><th>Chips</th><th>GPUS_ALL_REGIONS needed</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ct5lp-hightpu-1t</code></td><td>1</td><td>1 (confirmed: works with quota=1)</td></tr>
+            <tr><td><code>ct5lp-hightpu-4t</code></td><td>4</td><td>4 (inferred)</td></tr>
+            <tr><td><code>ct5lp-hightpu-8t</code></td><td>8</td><td>8 (confirmed: fails with quota=1)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>With <code>GPUS_ALL_REGIONS=1</code>, creating a <code>ct5lp-hightpu-8t</code> node fails with "Quota exceeded. Limit: 1.0 globally." Creating a <code>ct5lp-hightpu-1t</code> succeeds. The counting is per-chip.</p>
+
+      <h3>The quota request experience</h3>
+
+      <p>I requested an increase from 0 to 16. Google's response:</p>
+
+      <blockquote>
+        <p>We're unable to grant your requested increase at this time, as it requires support from your Sales Team. However, you still have an option to create a new request for 1 GPUS_ALL_REGIONS.</p>
+      </blockquote>
+
+      <p>So I took the 1. With 1 chip of quota, I could only use <code>ct5lp-hightpu-1t</code> (16GB HBM), which limits me to models under roughly 8B parameters in bf16. If you need more than 1 chip, you need to engage Google Cloud Sales. This is not a self-service operation for new projects.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 3. CAPACITY PLANNING AND ZONE SELECTION -->
+    <!-- ============================================================ -->
+    <section id="capacity-planning">
+      <h2>3. Capacity Planning and Zone Selection</h2>
+
+      <p>Having quota doesn't mean having capacity. TPU availability is constrained globally, and it varies by zone and time of day.</p>
+
+      <h3>How to scan for TPU availability</h3>
+
+      <p>List TPU accelerator types available in a zone:</p>
+
+<pre class="language-bash"><code>gcloud compute tpus accelerator-types list \
+  --zone=us-central1-a --project=YOUR_PROJECT</code></pre>
+
+      <p>List GKE machine types in a zone:</p>
+
+<pre class="language-bash"><code>gcloud compute machine-types list \
+  --zones=us-central1-a --project=YOUR_PROJECT \
+  --filter="name~ct5lp OR name~ct6e" \
+  --format="value(name)"</code></pre>
+
+      <h3>Machine type reference</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Machine Type</th><th>TPU Version</th><th>Chips</th><th>HBM</th><th>Host Type</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ct5lp-hightpu-1t</code></td><td>v5e</td><td>1</td><td>16GB</td><td>Single-host</td></tr>
+            <tr><td><code>ct5lp-hightpu-4t</code></td><td>v5e</td><td>4</td><td>64GB</td><td>Single-host</td></tr>
+            <tr><td><code>ct5lp-hightpu-8t</code></td><td>v5e</td><td>8</td><td>128GB</td><td>Single-host</td></tr>
+            <tr><td><code>ct6e-standard-1t</code></td><td>v6e (Trillium)</td><td>1</td><td>32GB</td><td>Single-host</td></tr>
+            <tr><td><code>ct6e-standard-4t</code></td><td>v6e (Trillium)</td><td>4</td><td>128GB</td><td>Single-host</td></tr>
+            <tr><td><code>ct6e-standard-8t</code></td><td>v6e (Trillium)</td><td>8</td><td>256GB</td><td>Single-host</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Zone availability map (April 2026)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Zone</th><th>v5e machine types</th><th>v6e machine types</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>us-central1-a</td><td>1t, 4t, 8t</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>us-central1-b</td><td>None</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>us-central1-c</td><td>None</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>europe-west4-a</td><td>1t, 4t, 8t</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>europe-west4-b</td><td>1t, 4t, 8t</td><td>None</td></tr>
+            <tr><td>us-east5-a</td><td>1t, 4t, 8t</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>us-east5-b</td><td>1t, 4t, 8t</td><td>1t, 4t, 8t</td></tr>
+            <tr><td>us-east5-c</td><td>1t, 4t, 8t</td><td>1t, 4t, 8t</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>I tried every zone on this list over the course of a full day. Capacity was exhausted everywhere. Eventually, after receiving <code>GPUS_ALL_REGIONS=1</code>, a single-chip node provisioned successfully in <code>us-central1-a</code> within minutes.</p>
+
+      <p>The practical strategy: create the node pool with <code>--min-nodes=0</code> and let GKE retry automatically. Capacity fluctuates. The node pool sits in a "waiting for capacity" state and provisions as soon as hardware opens up. Don't delete and recreate across zones -- that's what I did, and it wasted hours. The key distinction: capacity errors auto-retry. Quota errors are permanent until you request an increase.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 4. CLUSTER SETUP -->
+    <!-- ============================================================ -->
+    <section id="cluster-setup">
+      <h2>4. Cluster Setup</h2>
+
+      <p>I learned this one the hard way: enabling Workload Identity and GCS FUSE after cluster creation takes about 30 minutes (two separate 15-minute updates that can't run in parallel). The fast path is to enable everything at creation time.</p>
+
+      <h3>The fast way</h3>
+
+<pre class="language-bash"><code>gcloud container clusters create tpu-cluster \
+  --zone=us-central1-a \
+  --release-channel=rapid \
+  --machine-type=e2-standard-4 \
+  --num-nodes=1 \
+  --workload-pool=YOUR_PROJECT.svc.id.goog \
+  --addons=GcsFuseCsiDriver \
+  --project=YOUR_PROJECT</code></pre>
+
+      <p>Use <code>--release-channel=rapid</code> to get GKE 1.35.x, which has the best TPU support. The default pool (<code>e2-standard-4</code>) is just for system workloads. Cluster creation takes 8-12 minutes.</p>
+
+      <h3>The slow way (if the cluster already exists)</h3>
+
+      <p>Workload Identity <strong>must</strong> be enabled before GCS FUSE. They cannot be combined into one <code>gcloud container clusters update</code> command. I tried -- it errors out with "Exactly one of [...] must be specified."</p>
+
+<pre class="language-bash"><code># Step 1: Workload Identity (~15 min)
+gcloud container clusters update tpu-cluster \
+  --zone=us-central1-a --project=YOUR_PROJECT \
+  --workload-pool=YOUR_PROJECT.svc.id.goog
+
+# Step 2: GCS FUSE (~15 min, FAILS if step 1 isn't done)
+gcloud container clusters update tpu-cluster \
+  --zone=us-central1-a --project=YOUR_PROJECT \
+  --update-addons=GcsFuseCsiDriver=ENABLED</code></pre>
+
+      <p>If you try to enable GCS FUSE without Workload Identity:</p>
+
+<pre class="language-plaintext"><code>INVALID_ARGUMENT: Workload Identity must be enabled for GCS Fuse CSI driver addon.</code></pre>
+
+      <p>Two sequential update calls, 15 minutes each. Save yourself the 30 minutes and enable both at creation time.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 5. TPU NODE POOL CONFIGURATION -->
+    <!-- ============================================================ -->
+    <section id="tpu-node-pool">
+      <h2>5. TPU Node Pool Configuration</h2>
+
+      <p>This is the number one source of confusion in GKE TPU setup: for TPU node pools, you use <code>--machine-type</code>, not <code>--accelerator</code>. The <code>--accelerator</code> flag is for GPUs only. I'd wager most people's first attempt uses <code>--accelerator</code>, because that's what every GPU tutorial teaches.</p>
+
+      <h3>The correct syntax</h3>
+
+<pre class="language-bash"><code>gcloud container node-pools create tpu-v5e-pool \
+  --cluster=tpu-cluster \
+  --zone=us-central1-a \
+  --machine-type=ct5lp-hightpu-1t \
+  --num-nodes=1 \
+  --enable-autoscaling --min-nodes=0 --max-nodes=1 \
+  --project=YOUR_PROJECT</code></pre>
+
+      <h3>Wrong ways I tried</h3>
+
+<pre class="language-bash"><code># WRONG: --accelerator is for GPUs, not TPUs
+--accelerator type=tpu-v5-lite,count=1
+--accelerator type=v5litepod-1,count=1
+
+# WRONG: single-host types reject --tpu-topology in some zones
+--machine-type=ct5lp-hightpu-8t --tpu-topology=2x4
+
+# WRONG: autoscale max must be compatible with topology for multi-host
+--tpu-topology=2x2 --max-nodes=4</code></pre>
+
+      <h3>When to use --tpu-topology</h3>
+
+      <p>For <strong>single-host</strong> types (1t, 4t, 8t): do not specify <code>--tpu-topology</code>. The behavior is inconsistent across zones. In <code>us-central1-a</code>, <code>ct5lp-hightpu-4t --tpu-topology=2x2</code> was accepted. In <code>us-east5-a</code>, the same command returned "Unsupported TPU configuration." For single-host types, just omit it.</p>
+
+      <p>For <strong>multi-host</strong> types (16t and above): you must specify <code>--tpu-topology</code> (e.g., <code>4x4</code>).</p>
+
+      <h3>Capacity errors vs. quota errors</h3>
+
+      <p>When node creation fails, the error message tells you whether to wait or give up. Learning to read these saved me significant time.</p>
+
+      <p><strong>Capacity error</strong> -- wait, it auto-retries:</p>
+
+<pre class="language-plaintext"><code>TPU: the nodes cannot be created now due to lack of capacity.
+They will be created asynchronously once capacity is available.</code></pre>
+
+      <p>The node pool is created, the managed instance group keeps retrying in the background. Leave it alone.</p>
+
+      <p><strong>Quota error</strong> -- stop, this needs manual action:</p>
+
+<pre class="language-plaintext"><code>Quota 'GPUS_ALL_REGIONS' exceeded. Limit: 1.0 globally.</code></pre>
+
+      <p>Hard stop. No amount of waiting fixes this. You need to increase quota first.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 6. MODEL SELECTION AND GEMMA 4 COMPATIBILITY -->
+    <!-- ============================================================ -->
+    <section id="model-selection">
+      <h2>6. Model Selection and Gemma 4 Compatibility</h2>
+
+      <p>Choosing a model for TPU inference is a function of two constraints: how much HBM your machine type provides, and whether vLLM's TPU backend actually supports the model architecture.</p>
+
+      <h3>HBM sizing</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Hardware</th><th>HBM</th><th>Max Model (bf16)</th><th>Recommended</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ct5lp-hightpu-1t</code> (1 chip)</td><td>16GB</td><td>~8B params</td><td>Gemma 3 4B</td></tr>
+            <tr><td><code>ct5lp-hightpu-4t</code> (4 chips)</td><td>64GB</td><td>~32B params</td><td>Gemma 3 27B</td></tr>
+            <tr><td><code>ct5lp-hightpu-8t</code> (8 chips)</td><td>128GB</td><td>~64B params</td><td>Gemma 4 26B MoE, Llama 3.1 70B</td></tr>
+            <tr><td><code>ct6e-standard-8t</code> (8 chips)</td><td>256GB</td><td>~128B params</td><td>Llama 3.1 70B with room</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>vLLM TPU support matrix (April 2026)</h3>
+
+      <p>From the <a href="https://github.com/vllm-project/tpu-inference">vllm-project/tpu-inference</a> support matrix:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Model</th><th>Status on TPU</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>google/gemma-3-27b-it</code></td><td>Fully passing (unit + correctness + performance)</td></tr>
+            <tr><td><code>meta-llama/Llama-3.1-8B-Instruct</code></td><td>Fully passing</td></tr>
+            <tr><td><code>meta-llama/Llama-3.3-70B-Instruct</code></td><td>Fully passing</td></tr>
+            <tr><td><code>google/gemma-4-26B-A4B-it</code></td><td>Unit tests FAILING on nightly</td></tr>
+            <tr><td><code>google/gemma-4-31B-it</code></td><td>Unit tests FAILING on nightly</td></tr>
+            <tr><td><code>google/gemma-4-E4B-it</code></td><td>FAILING -- shared layers (I tested)</td></tr>
+            <tr><td><code>google/gemma-4-E2B-it</code></td><td>FAILING -- shared layers (I tested)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>I tried Gemma 4. Four times.</h3>
+
+      <p>I attempted every Gemma 4 variant on vLLM TPU nightly. Each failed at a different stage, which made the debugging interesting -- the errors formed a progression from "too old" to "architecturally incompatible."</p>
+
+      <h4>Attempt 1: vllm/vllm-tpu:latest (v0.18.0) + Gemma 4 E4B</h4>
+
+<pre class="language-plaintext"><code>ValueError: The checkpoint you are trying to load has model type `gemma4`
+but Transformers does not recognize this architecture.</code></pre>
+
+      <p>The stable image's Transformers library is too old to know about the Gemma 4 architecture. Fair enough -- I switched to nightly.</p>
+
+      <h4>Attempt 2: vllm/vllm-tpu:nightly + Gemma 4 E4B</h4>
+
+<pre class="language-plaintext"><code>ValueError: Chunked MM input disabled but max_tokens_per_mm_item (2496)
+is larger than max_num_batched_tokens (256).</code></pre>
+
+      <p>Gemma 4 is multimodal and needs <code>--max-num-batched-tokens &gt;= 2496</code>. I added that flag and tried again.</p>
+
+      <h4>Attempt 3: vllm/vllm-tpu:nightly + Gemma 4 E4B + fixed batch tokens</h4>
+
+<pre class="language-plaintext"><code>AssertionError: Expect no shared layers</code></pre>
+
+      <p>This is the actual blocker. Gemma 4's architecture uses weight-tied (shared) layers. The <code>tpu-inference</code> backend asserts that these don't exist. This is a code-level limitation in both the Flax and TorchAX paths, not a configuration issue.</p>
+
+      <h4>Attempt 4: vllm/vllm-tpu:nightly + Gemma 4 E2B (smaller variant)</h4>
+
+<pre class="language-plaintext"><code>AssertionError: Expect no shared layers</code></pre>
+
+      <p>Same error. All Gemma 4 models share this architecture trait. The fix needs to come from the vLLM TPU team.</p>
+
+      <p><strong>Workaround:</strong> use Gemma 3. <code>google/gemma-3-4b-it</code> for 1 chip or <code>google/gemma-3-27b-it</code> for 4-8 chips are fully validated. I deployed Gemma 3 4B on my single TPU v5e chip, and it works perfectly.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 7. DEPLOYING VLLM ON TPU -->
+    <!-- ============================================================ -->
+    <section id="deploying-vllm">
+      <h2>7. Deploying vLLM on TPU</h2>
+
+      <h3>The nodeSelector labels</h3>
+
+      <p>GKE Warden enforces that TPU pods have <strong>both</strong> the accelerator and topology nodeSelector labels. Missing either one causes an instant admission webhook rejection:</p>
+
+<pre class="language-plaintext"><code>GKE Warden rejected the request because it violates one or more constraints.
+Missing nodeSelector/nodeAffinity label cloud.google.com/gke-tpu-topology.</code></pre>
+
+      <p>I'd recommend checking what labels your TPU nodes actually have before writing the Deployment manifest:</p>
+
+<pre class="language-bash"><code>kubectl get nodes -l cloud.google.com/gke-tpu-accelerator -o json | \
+  python3 -c "
+import json, sys
+for node in json.load(sys.stdin)['items']:
+    labels = {k:v for k,v in node['metadata']['labels'].items() if 'tpu' in k}
+    print(f\"{node['metadata']['name']}: {labels}\")
+"</code></pre>
+
+      <p>For my <code>ct5lp-hightpu-1t</code> node, the labels were:</p>
+
+<pre class="language-yaml"><code>cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+cloud.google.com/gke-tpu-topology: 1x1</code></pre>
+
+      <p>For <code>ct5lp-hightpu-8t</code>, they would be:</p>
+
+<pre class="language-yaml"><code>cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+cloud.google.com/gke-tpu-topology: 2x4</code></pre>
+
+      <h3>Key deployment fields</h3>
+
+      <p>Four fields must stay in sync with your hardware:</p>
+
+<pre class="language-yaml"><code>nodeSelector:
+  cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+  cloud.google.com/gke-tpu-topology: 1x1      # match your machine type!
+resources:
+  limits:
+    google.com/tpu: 1                           # match your chip count!
+args:
+  - --tensor-parallel-size=1                    # match your chip count!
+  - --model=google/gemma-3-4b-it                # match your HBM capacity!</code></pre>
+
+      <p>I chose <code>strategy: Recreate</code> rather than <code>RollingUpdate</code>. TPU resources can't be shared between an old and new pod simultaneously -- the device is exclusive. Recreate kills the old pod first, then starts the new one.</p>
+
+      <details>
+        <summary>View full manifest: k8s/vllm-deployment.yaml</summary>
+        <div><pre class="language-yaml"><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-tpu
+  namespace: vllm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm-tpu
+  template:
+    metadata:
+      labels:
+        app: vllm-tpu
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+    spec:
+      serviceAccountName: vllm-gcs-sa
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+        cloud.google.com/gke-tpu-topology: 1x1
+      containers:
+      - name: vllm-tpu
+        image: vllm/vllm-tpu:nightly
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - --host=0.0.0.0
+        - --port=8000
+        - --tensor-parallel-size=1
+        - --max-model-len=1024
+        # Gemma 4 fails on vLLM TPU: "Expect no shared layers" (all Gemma 4 variants)
+        # Tracked at: https://github.com/vllm-project/tpu-inference
+        # - --model=google/gemma-4-E4B-it     # 8B, fails: shared layers
+        # - --model=google/gemma-4-E2B-it     # 5B, fails: shared layers
+        # - --model=google/gemma-4-26B-A4B-it # 26B MoE, fails: shared layers
+        - --model=google/gemma-3-4b-it
+        - --download-dir=/data
+        - --max-num-batched-tokens=4096
+        - --max-num-seqs=16
+        - --dtype=bfloat16
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: hf_api_token
+        - name: VLLM_XLA_CACHE_PATH
+          value: "/data"
+        - name: VLLM_USE_V1
+          value: "1"
+        ports:
+        - containerPort: 8000
+        resources:
+          limits:
+            google.com/tpu: 1
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 300
+          periodSeconds: 30
+        volumeMounts:
+        - name: gcs-fuse-csi-ephemeral
+          mountPath: /data
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: gke-gcsfuse-cache
+        emptyDir:
+          medium: Memory
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: gcs-fuse-csi-ephemeral
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: YOUR_BUCKET_NAME
+            mountOptions: "implicit-dirs,file-cache:enable-parallel-downloads:true,file-cache:parallel-downloads-per-file:100,file-cache:max-parallel-downloads:-1,file-cache:download-chunk-size-mb:10,file-cache:max-size-mb:-1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: vllm
+spec:
+  selector:
+    app: vllm-tpu
+  type: LoadBalancer
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8000
+    targetPort: 8000</code></pre></div>
+      </details>
+
+      <h3>GCS FUSE for model weight caching</h3>
+
+      <p>The first pod downloads weights from Hugging Face, which takes 5-20 minutes depending on model size. Subsequent pods read from the GCS cache and start in 1-3 minutes. I enabled parallel downloads for speed:</p>
+
+<pre class="language-yaml"><code>mountOptions: "implicit-dirs,file-cache:enable-parallel-downloads:true,file-cache:parallel-downloads-per-file:100,file-cache:max-parallel-downloads:-1"</code></pre>
+
+      <p>This makes a significant difference for scale-up time. The second replica can be serving requests within a few minutes of the node becoming available, rather than waiting for a full download.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 8. AUTOSCALING WITH HPA AND MANAGED PROMETHEUS -->
+    <!-- ============================================================ -->
+    <section id="autoscaling">
+      <h2>8. Autoscaling with HPA and Managed Prometheus</h2>
+
+      <p>The autoscaling infrastructure has three layers, each bridging a gap between what vLLM exposes and what Kubernetes HPA can consume.</p>
+
+      <h3>Layer 1: PodMonitoring</h3>
+
+      <p>Google Cloud Managed Prometheus is enabled by default on GKE. I configured a <code>PodMonitoring</code> resource to scrape vLLM's <code>/metrics</code> endpoint every 15 seconds. This is the source of truth for how the model server is doing.</p>
+
+<pre class="language-yaml"><code>apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: vllm-pod-monitoring
+  namespace: vllm
+spec:
+  selector:
+    matchLabels:
+      app: vllm-tpu
+  endpoints:
+  - path: /metrics
+    port: 8000
+    interval: 15s</code></pre>
+
+      <details>
+        <summary>View full manifest: k8s/pod-monitoring.yaml</summary>
+        <div><pre class="language-yaml"><code>apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: vllm-pod-monitoring
+  namespace: vllm
+spec:
+  selector:
+    matchLabels:
+      app: vllm-tpu
+  endpoints:
+  - path: /metrics
+    port: 8000
+    interval: 15s</code></pre></div>
+      </details>
+
+      <h3>Layer 2: Custom Metrics Adapter</h3>
+
+      <p>This bridges Prometheus metrics to the Kubernetes custom metrics API, which is what HPA reads from. Without it, HPA has no way to see application-level metrics.</p>
+
+<pre class="language-bash"><code>kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-stackdriver/master/custom-metrics-stackdriver-adapter/deploy/production/adapter_new_resource_model.yaml</code></pre>
+
+      <p>The adapter's service account needs monitoring access:</p>
+
+<pre class="language-bash"><code>PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT --format="value(projectNumber)")
+gcloud projects add-iam-policy-binding projects/YOUR_PROJECT \
+  --role roles/monitoring.viewer \
+  --member="principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/YOUR_PROJECT.svc.id.goog/subject/ns/custom-metrics/sa/custom-metrics-stackdriver-adapter"</code></pre>
+
+      <h3>Layer 3: HorizontalPodAutoscaler</h3>
+
+      <p>Two vLLM metrics are useful for autoscaling on TPU:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Metric</th><th>Best For</th><th>When It Grows</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>num_requests_waiting</code></td><td>Throughput / cost optimization</td><td>KV cache is full, requests queue up</td></tr>
+            <tr><td><code>gpu_cache_usage_perc</code></td><td>Latency-sensitive workloads</td><td>KV cache filling up (proactive)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Yes, the metric is called <code>gpu_cache_usage_perc</code> even on TPU. It measures the KV cache, not anything GPU-specific. Another naming gift from the ecosystem.</p>
+
+      <p>I chose <code>num_requests_waiting</code> with a threshold of 5 for this deployment:</p>
+
+<pre class="language-yaml"><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-tpu
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Pods
+    pods:
+      metric:
+        name: prometheus.googleapis.com|vllm:num_requests_waiting|gauge
+      target:
+        type: AverageValue
+        averageValue: 5</code></pre>
+
+      <details>
+        <summary>View full manifest: k8s/hpa.yaml</summary>
+        <div><pre class="language-yaml"><code># HorizontalPodAutoscaler for vLLM on TPU
+#
+# Scales based on vLLM's num_requests_waiting metric, which reflects
+# the number of requests queued in the server. When the KV cache fills
+# up, this metric climbs and triggers a scale-out.
+#
+# For latency-sensitive workloads, swap to gpu_cache_usage_perc instead.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-hpa
+  namespace: vllm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-tpu
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Pods
+    pods:
+      metric:
+        name: prometheus.googleapis.com|vllm:num_requests_waiting|gauge
+      target:
+        type: AverageValue
+        # Low threshold for demo purposes so autoscaling triggers quickly.
+        # In production, profile your workload to find the right value.
+        averageValue: 5
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120</code></pre></div>
+      </details>
+
+      <h3>The end-to-end autoscaling chain</h3>
+
+      <p>When everything is wired up, the signal flows like this: incoming load increases, vLLM's request queue grows, Managed Prometheus scrapes the <code>num_requests_waiting</code> metric every 15 seconds, Cloud Monitoring ingests it, the Custom Metrics Adapter exposes it to the Kubernetes API, HPA reads the metric and decides to scale to 2 replicas, Kubernetes schedules a second vLLM pod, the pod lands in Pending state because there's no available TPU node, the node pool autoscaler provisions a new TPU node, and the pod starts loading the model from the GCS cache. Within a few minutes, the second replica is Ready and serving requests.</p>
+
+      <p>Scale-down reverses the process: about 5 minutes of HPA cooldown, then 10-15 minutes before the idle TPU node is removed by the node pool autoscaler.</p>
+
+      <h3>Live HPA output from the deployment</h3>
+
+<pre class="language-plaintext"><code>NAME       REFERENCE             TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+vllm-hpa   Deployment/vllm-tpu   0/5       1         2         1          6m</code></pre>
+
+      <p>The HPA was reading the metric correctly: <code>0/5</code> means 0 waiting requests against a threshold of 5. With <code>GPUS_ALL_REGIONS=1</code>, the node pool max is 1, so autoscaling to a second TPU node would require more quota. But the entire signal chain is proven and working. When more quota arrives, I just change <code>maxReplicas</code> and the node pool's <code>--max-nodes</code>.</p>
+
+      <details>
+        <summary>View load testing script: scripts/load-test.sh</summary>
+        <div><pre class="language-bash"><code>#!/usr/bin/env bash
+#
+# load-test.sh -- Generates parallel requests against the vLLM endpoint
+# to demonstrate HPA autoscaling on GKE TPU.
+#
+# Usage:
+#   ./scripts/load-test.sh            # 20 parallel workers (default)
+#   ./scripts/load-test.sh 50         # 50 parallel workers
+#   ./scripts/load-test.sh 50 stop    # kill background load generators
+#
+set -euo pipefail
+
+NAMESPACE="${NAMESPACE:-vllm}"
+N="${1:-20}"
+ACTION="${2:-start}"
+
+if [[ "$ACTION" == "stop" ]]; then
+  echo "Stopping all background load generators..."
+  pkill -f "load-test-worker" 2&gt;/dev/null || true
+  echo "Done."
+  exit 0
+fi
+
+VLLM_IP=$(kubectl get service vllm-service -n "$NAMESPACE" \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2&gt;/dev/null)
+
+if [[ -z "$VLLM_IP" ]]; then
+  echo "ERROR: Could not get vllm-service external IP. Is the service running?"
+  exit 1
+fi
+
+MODEL="${MODEL:-google/gemma-3-4b-it}"
+
+echo "=== vLLM Load Test ==="
+echo "  Endpoint:  http://$VLLM_IP:8000"
+echo "  Model:     $MODEL"
+echo "  Workers:   $N"
+echo ""
+echo "Press Ctrl+C to stop, or run: $0 0 stop"
+echo ""
+
+for i in $(seq 1 "$N"); do
+  (
+    while true; do
+      curl -s --max-time 120 \
+        "http://$VLLM_IP:8000/v1/completions" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"model\": \"$MODEL\",
+          \"prompt\": \"Write a comprehensive essay about the history of artificial intelligence, covering its origins, key milestones, and future directions.\",
+          \"max_tokens\": 500,
+          \"temperature\": 0.7
+        }" &gt; /dev/null 2&gt;&amp;1
+    done
+  ) &amp;
+done
+
+echo "Load test running with $N workers (PIDs in background)."
+echo "Monitor autoscaling with:  kubectl get hpa -n $NAMESPACE --watch"
+wait</code></pre></div>
+      </details>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 9. OPERATIONAL NOTES -->
+    <!-- ============================================================ -->
+    <section id="operational-notes">
+      <h2>9. Operational Notes</h2>
+
+      <p>These are the things that didn't fit neatly into other sections but will save you time if you know them going in.</p>
+
+      <h3>XLA cache conflicts on scale-up</h3>
+
+      <p>When two vLLM pods write the XLA compilation cache to the same GCS path simultaneously, you get:</p>
+
+<pre class="language-plaintext"><code>RuntimeError: filesystem error: cannot create directories</code></pre>
+
+      <p>Two options: remove the <code>VLLM_XLA_CACHE_PATH</code> environment variable entirely (each pod recompiles from scratch, slower startup), or scale to 1 first, wait for the cache write to finish, then scale to 2+. I'd recommend the second approach for production.</p>
+
+      <h3>Readiness and liveness probe tuning</h3>
+
+      <p>Model loading takes minutes, not seconds. I set the readiness probe's <code>initialDelaySeconds</code> to 120 and the liveness probe's to 300. For a 4B model on a single chip, the pod went Ready about 6 minutes after creation. For larger models, increase these further.</p>
+
+<pre class="language-yaml"><code>readinessProbe:
+  initialDelaySeconds: 120    # 2 min for small models
+  periodSeconds: 10
+livenessProbe:
+  initialDelaySeconds: 300    # 5 min before killing
+  periodSeconds: 30</code></pre>
+
+      <p>If the liveness probe fires before the model finishes loading, Kubernetes kills the pod and restarts it. This creates a crash loop that looks like a model loading failure but is actually a probe timing issue.</p>
+
+      <h3>MIG status monitoring</h3>
+
+      <p>When a TPU node is stuck provisioning, <code>kubectl get nodes</code> shows nothing because the node doesn't exist yet. To see what's actually happening at the infrastructure layer, check the managed instance group:</p>
+
+<pre class="language-bash"><code>gcloud compute instance-groups managed describe \
+  $(gcloud compute instance-groups managed list --project=YOUR_PROJECT \
+    --zones=us-central1-a --format="value(name)" | grep tpu) \
+  --zone=us-central1-a --project=YOUR_PROJECT \
+  --format="yaml(status,currentActions)"</code></pre>
+
+      <p>This shows <code>creating: N</code>, <code>pending: N</code>, and similar status information. Much more informative than staring at an empty node list.</p>
+
+      <h3>Addon enable ordering</h3>
+
+      <p>To reiterate: Workload Identity must be enabled before GCS FUSE. They can't be combined into one update command. Two sequential updates, 15 minutes each. Enable both at cluster creation to avoid this entirely.</p>
+
+      <h3>--tpu-topology inconsistency</h3>
+
+      <p>The <code>--tpu-topology</code> flag behaves differently across zones for single-host types. I found that <code>us-central1-a</code> accepted it for <code>ct5lp-hightpu-4t</code>, but <code>us-east5-a</code> rejected the same command. For single-host types, omit <code>--tpu-topology</code> entirely. For multi-host types (16t+), it's required.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 10. LESSONS LEARNED -->
+    <!-- ============================================================ -->
+    <section id="lessons-learned">
+      <h2>10. Lessons Learned</h2>
+
+      <p>The hardest part of this project was not the code, the YAML, or the architecture. It was getting a single chip of TPU quota. The entire deployment -- from cluster creation to a live, autoscaling inference endpoint -- took about 20 minutes once quota was sorted. The preceding 6 hours were spent fighting quota and capacity.</p>
+
+      <p>I'd recommend starting on the smallest possible hardware and proving the full stack end to end before scaling up. I deployed the entire autoscaling infrastructure on a single TPU chip serving a 4B model. When more quota arrives, I change four values: machine type (<code>ct5lp-hightpu-1t</code> to <code>ct5lp-hightpu-8t</code>), topology label (<code>1x1</code> to <code>2x4</code>), TPU count (1 to 8), and tensor parallel size (1 to 8). Everything else -- GCS FUSE, Workload Identity, PodMonitoring, HPA, the load testing scripts -- stays exactly the same.</p>
+
+      <p>TPU quota beyond 1 chip requires Google Cloud Sales engagement. The self-service quota request system will redirect you. This isn't a bug -- it's how TPU allocation works for projects without an existing sales relationship. Budget time for this conversation, especially if you're on a deadline.</p>
+
+      <p>Capacity errors and quota errors look similar but demand different responses. Capacity errors auto-retry: create the node pool and let GKE handle it. Quota errors are permanent until you manually request an increase. I wasted hours zone-hopping for capacity when the real blocker was <code>GPUS_ALL_REGIONS=0</code> all along, hidden behind capacity errors that fired first.</p>
+
+      <p>Build around the constraint, not against it. When I got <code>GPUS_ALL_REGIONS=1</code> instead of the 16 I'd asked for, I could have stopped. Instead, I scoped the deployment to fit the constraint: a single chip, a smaller model, and the same autoscaling architecture that will work at full scale. The constraint shaped the deployment, but it didn't block the learning.</p>
+
+      <p>The naming is misleading everywhere, and this is worth internalizing before you start. <code>GPUS_ALL_REGIONS</code> blocks TPUs, not just GPUs. The <code>--accelerator</code> flag in GKE is for GPUs; TPUs use <code>--machine-type</code>. <code>TPU_LITE_DEVICE_V5</code> and <code>TPU_LITE_PODSLICE_V5</code> are different quotas for different chip counts. <code>gpu_cache_usage_perc</code> in vLLM works on TPUs too -- it measures the KV cache, and the name is an artifact from when vLLM only supported GPUs. Once you accept that the names are lies, you can work with the system rather than being confused by it.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 11. REPOSITORY AND TEARDOWN -->
+    <!-- ============================================================ -->
+    <section id="repository-teardown">
+      <h2>11. Repository and Teardown</h2>
+
+      <p>The full code, manifests, and scripts are at <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling">github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling</a>.</p>
+
+      <h3>File tree</h3>
+
+      <div class="file-tree">
+<a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/deploy-tpu-cluster.sh">deploy-tpu-cluster.sh</a>       # Main deployment script (zones, quotas, retries)
+<a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/tree/main/k8s/">k8s/</a>
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/k8s/vllm-deployment.yaml">vllm-deployment.yaml</a>       # Deployment + Service for vLLM on TPU
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/k8s/pod-monitoring.yaml">pod-monitoring.yaml</a>        # PodMonitoring for Prometheus scraping
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/k8s/hpa.yaml">hpa.yaml</a>                   # HorizontalPodAutoscaler manifest
+<a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/tree/main/scripts/">scripts/</a>
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/scripts/load-test.sh">load-test.sh</a>               # Load testing for HPA demonstration
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/scripts/check-status.sh">check-status.sh</a>            # Quick cluster/pod status check
+  <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling/blob/main/scripts/teardown.sh">teardown.sh</a>                # Full resource cleanup
+      </div>
+
+      <h3>Teardown</h3>
+
+      <p>The included teardown script removes everything in order: Kubernetes namespace, Custom Metrics Adapter, GCS bucket, TPU node pool, and the GKE cluster itself.</p>
+
+<pre class="language-bash"><code># Option 1: Use the included script
+./scripts/teardown.sh
+
+# Option 2: Manual
+kubectl delete namespace vllm
+kubectl delete -f https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-stackdriver/master/custom-metrics-stackdriver-adapter/deploy/production/adapter_new_resource_model.yaml
+gcloud storage rm --recursive gs://vllm-tpu-benchmark-model-cache
+gcloud container clusters delete tpu-cluster \
+  --zone=us-central1-a --project=vllm-tpu-benchmark --quiet</code></pre>
+
+      <details>
+        <summary>View full script: scripts/teardown.sh</summary>
+        <div><pre class="language-bash"><code>#!/usr/bin/env bash
+#
+# teardown.sh -- Removes all resources created by this demo.
+#
+# Usage:
+#   ./scripts/teardown.sh           # interactive confirmation
+#   ./scripts/teardown.sh --force   # skip confirmation
+#
+set -euo pipefail
+
+PROJECT="${PROJECT:-vllm-tpu-benchmark}"
+ZONE="${ZONE:-us-central1-a}"
+CLUSTER="${CLUSTER:-tpu-cluster}"
+NAMESPACE="${NAMESPACE:-vllm}"
+BUCKET="${BUCKET:-vllm-tpu-benchmark-model-cache}"
+FORCE=false
+
+[[ "${1:-}" == "--force" ]] &amp;&amp; FORCE=true
+
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+echo -e "${BOLD}=== Teardown: vLLM TPU Autoscaling Demo ===${NC}"
+echo ""
+echo "  Project:   $PROJECT"
+echo "  Zone:      $ZONE"
+echo "  Cluster:   $CLUSTER"
+echo "  Namespace: $NAMESPACE"
+echo "  Bucket:    gs://$BUCKET"
+echo ""
+
+if [[ "$FORCE" != true ]]; then
+  read -r -p "This will DELETE everything listed above. Proceed? [y/N] " confirm
+  if [[ "$confirm" != [yY] ]]; then
+    echo "Aborted."
+    exit 0
+  fi
+fi
+
+echo ""
+
+echo "[1/5] Deleting Kubernetes resources in namespace '$NAMESPACE'..."
+kubectl delete namespace "$NAMESPACE" --ignore-not-found 2&gt;&amp;1 || true
+
+echo "[2/5] Deleting Custom Metrics Adapter..."
+kubectl delete -f https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-stackdriver/master/custom-metrics-stackdriver-adapter/deploy/production/adapter_new_resource_model.yaml 2&gt;&amp;1 || true
+
+echo "[3/5] Deleting GCS bucket gs://$BUCKET..."
+gcloud storage rm --recursive "gs://$BUCKET" --project="$PROJECT" 2&gt;&amp;1 || true
+
+echo "[4/5] Deleting TPU node pool..."
+gcloud container node-pools delete tpu-v5e-pool \
+  --cluster="$CLUSTER" --zone="$ZONE" --project="$PROJECT" --quiet 2&gt;&amp;1 || true
+
+echo "[5/5] Deleting GKE cluster..."
+gcloud container clusters delete "$CLUSTER" \
+  --zone="$ZONE" --project="$PROJECT" --quiet 2&gt;&amp;1 || true
+
+echo ""
+echo -e "${BOLD}Teardown complete.${NC}"</code></pre></div>
+      </details>
+
+      <h3>What to change for 8-chip scaling</h3>
+
+      <p>When more <code>GPUS_ALL_REGIONS</code> quota arrives, the changes are minimal:</p>
+
+      <ul>
+        <li>Node pool machine type: <code>ct5lp-hightpu-1t</code> to <code>ct5lp-hightpu-8t</code></li>
+        <li>Deployment nodeSelector topology: <code>1x1</code> to <code>2x4</code></li>
+        <li>Deployment TPU resource limit: <code>1</code> to <code>8</code></li>
+        <li>vLLM <code>--tensor-parallel-size</code>: <code>1</code> to <code>8</code></li>
+        <li>Model: <code>google/gemma-3-4b-it</code> to <code>google/gemma-4-26B-A4B-it</code> (once vLLM TPU adds support) or <code>google/gemma-3-27b-it</code> (works today)</li>
+      </ul>
+
+      <p>Everything else -- GCS FUSE, Workload Identity, PodMonitoring, HPA, load testing -- stays identical.</p>
+    </section>
+
+  </main>
+
+  <!-- ── Footer ──────────────────────────────────────────────────── -->
+  <footer>
+    <p>Anubhav Singh, April 2026</p>
+    <p><a href="https://xprilion.com">xprilion.com</a> &middot; <a href="https://github.com/xprilion/gemma3-vllm-tpu-gke-autoscaling">GitHub Repository</a></p>
+  </footer>
+
+  <!-- ── Prism.js ────────────────────────────────────────────────── -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+  <script>
+    // ── Dark mode toggle ──────────────────────────────────────────
+    (function() {
+      var html = document.documentElement;
+      var toggle = document.getElementById('theme-toggle');
+      var stored = localStorage.getItem('theme');
+
+      function applyTheme(theme) {
+        if (theme === 'dark') {
+          html.classList.add('dark');
+          toggle.innerHTML = '&#9728;';
+        } else {
+          html.classList.remove('dark');
+          toggle.innerHTML = '&#9790;';
+        }
+      }
+
+      if (stored) {
+        applyTheme(stored);
+      } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        applyTheme('dark');
+      }
+
+      toggle.addEventListener('click', function() {
+        var isDark = html.classList.contains('dark');
+        var next = isDark ? 'light' : 'dark';
+        applyTheme(next);
+        localStorage.setItem('theme', next);
+      });
+    })();
+
+    // ── Re-highlight Prism inside <details> on open ───────────────
+    (function() {
+      document.querySelectorAll('details').forEach(function(el) {
+        el.addEventListener('toggle', function() {
+          if (el.open) {
+            Prism.highlightAllUnder(el);
+          }
+        }, { once: true });
+      });
+    })();
+  </script>
+</body>
+</html>
